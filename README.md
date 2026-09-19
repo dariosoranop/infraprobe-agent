@@ -59,82 +59,89 @@ infraprobe-agent/
     └── reporter.py
 ```
 
-## How to Use and Launch
+---
 
-Prerequisites
-Python 3.10+ (for local development or binary build)
+## ⚙️ Configuration & Prerequisites (`.env` and Credentials)
 
-Ollama installed locally or reachable on the internal network (running a model like qwen2.5:7b-instruct)
+Before launching the agent, make sure to address the following runtime prerequisites:
+* **Environment Variables (`.env`):** Copy `.env.example` to `.env` and configure your local Ollama endpoint and model name:
+  ```env
+  OLLAMA_HOST=http://localhost:11434
+  MODEL_NAME=qwen2.5:7b-instruct
+  ```
+* **Execution Credentials:** When running under restricted system accounts (such as the non-root Systemd user `infraprobe` or rootless Docker containers), interactive login tokens (e.g., `az login`) will not be inherited automatically. Ensure that either Managed Identities, Service Principals, or proper IAM instance profiles are correctly configured on the execution host.
 
-Cloud CLI authenticated (az login, aws configure, or gcloud auth application-default login)
+---
 
-Method A: Native Linux Binary & Systemd Service (No Docker)
-Ideal for secure, CIS-hardened RHEL / Rocky Linux VMs inside strict banking environments.
+## 🔄 What Happens When You Execute the Agent? (The 6-Step Workflow)
 
-1. Method A: Native Linux Binary & Systemd Service (No Docker)
-Ideal for secure, CIS-hardened RHEL / Rocky Linux VMs inside strict banking environments.
+Once you run the agent with the required parameters, it operates completely autonomously following an end-to-end execution pipeline:
 
-```text
-chmod +x build_binary.sh
-./build_binary.sh
-```
-2. Deploy to the target banking VM:
-- Copy the generated dist/infraprobe-agent binary to /opt/infraprobe-agent/.
+1. **Bootstrap & Air-Gap Safety Verification:** The agent initializes, prints the execution banner, and activates hardcoded security circuit breakers (`verify_air_gap_safety`) to block any unauthorized network egress, allowing connections strictly toward official cloud management endpoints.
+2. **Policy Initiatives & Governance Scan:** It queries native cloud policy APIs (such as Azure Policy Insights, AWS Config, or GCP Org Policies) to map active policies, disabled rules, overrides, and initial compliance gaps.
+3. **Hierarchical Governance Analysis & Fallback:** It reviews the organizational layout. If structural governance gaps or missing policy structures are found, the agent engages its architectural logic to blueprint a proper multi-tier layout (e.g., Tenant Root -> Management Groups -> Subscriptions).
+4. **Underlying Resource-Level Audit:** It compiles a secure, read-only inventory of cloud resources (VMs, storage accounts, network configurations) correlated to the evaluated policies.
+5. **Local AI Remediation & Code Generation:** It packages the structured findings and sends them securely to your offline, quantized local LLM (Ollama). The model analyzes the gaps against regulatory standards (ISO 27001, DORA, PCI, CIS, Rev 6) and outputs precise, production-ready remediation code (Terraform blocks or JSON policies).
+6. **Automated Report Generation & Saving:** It automatically creates a `reports/` directory and persists a comprehensive Markdown audit report containing timestamps, scope IDs, risk assessments, and code solutions ready for security reviewers.
 
-- Create a dedicated service user and directory:
+---
 
-```text
-sudo useradd -r -s /bin/false infraprobe
-sudo mkdir -p /opt/infraprobe-agent/reports
-sudo chown -R infraprobe:infraprobe /opt/infraprobe-agent
-```
+## 🛠️ How to Use and Launch
 
-3. Configure and start the Systemd service:
+### Method A: Native Linux Binary & Systemd Service (No Docker)
+*Ideal for secure, CIS-hardened RHEL / Rocky Linux VMs inside strict banking environments.*
 
-```text
-sudo cp infraprobe.service /etc/systemd/system/infraprobe.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now infraprobe.service
-```
+1. **Build the standalone binary** (on an authorized build machine with matching architecture):
+   ```bash
+   chmod +x build_binary.sh
+   ./build_binary.sh
+   ```
+2. **Deploy to the target banking VM:**
+   * Copy the generated `dist/infraprobe-agent` binary to `/opt/infraprobe-agent/`.
+   * Create a dedicated service user and directory:
+     ```bash
+     sudo useradd -r -s /bin/false infraprobe
+     sudo mkdir -p /opt/infraprobe-agent/reports
+     sudo chown -R infraprobe:infraprobe /opt/infraprobe-agent
+     ```
+3. **Configure and start the Systemd service:**
+   ```bash
+   sudo cp infraprobe.service /etc/systemd/system/infraprobe.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now infraprobe.service
+   ```
 
-Method B: Hardened Docker Container
-For environments where containerization is permitted.
+### Method B: Hardened Docker Container
+*For environments where containerization is permitted.*
 
-Build the image:
+1. **Build the image:**
+   ```bash
+   docker build -t infraprobe-agent .
+   ```
+2. **Run the container (Rootless, isolated):**
+   ```bash
+   docker run --rm --read-only \
+     -v ~/.azure:/home/appuser/.azure:ro \
+     -e OLLAMA_HOST="http://host.docker.internal:11434" \
+     infraprobe-agent \
+     --provider azure --target-id "<YOUR-SUBSCRIPTION-ID>"
+   ```
 
-```text
-docker build -t infraprobe-agent .
-```
+---
 
-2. docker build -t infraprobe-agent .
+## 💻 Provider-Specific Execution (CLI)
 
-```text
-docker run --rm --read-only \
-  -v ~/.azure:/home/appuser/.azure:ro \
-  -e OLLAMA_HOST="[http://host.docker.internal:11434](http://host.docker.internal:11434)" \
-  infraprobe-agent \
-  --provider azure --target-id "<YOUR-SUBSCRIPTION-ID>"
-```
-
-## Provider-Specific Execution (CLI)
-
-1. Microsoft Azure
-
-```text
-az login
+### 1. Microsoft Azure
+```bash
 python main.py --provider azure --target-id "<YOUR-AZURE-SUBSCRIPTION-ID>"
 ```
 
-2. Amazon Web Services (AWS)
-
-```text
-aws configure
+### 2. Amazon Web Services (AWS)
+```bash
 python main.py --provider aws --target-id "<YOUR-AWS-ACCOUNT-ID>"
 ```
 
-3. Google Cloud Platform (GCP)
-
-```text
-gcloud auth application-default login
+### 3. Google Cloud Platform (GCP)
+```bash
 python main.py --provider gcp --target-id "<YOUR-GCP-ORG-OR-PROJECT-ID>"
 ```
